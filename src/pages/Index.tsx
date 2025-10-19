@@ -17,6 +17,9 @@ import ProfileDialog from '@/components/ProfileDialog';
 import PaymentAnimation from '@/components/PaymentAnimation';
 import AdminPanel from '@/components/AdminPanel';
 import AdminKeyDialog from '@/components/AdminKeyDialog';
+import AuthDialog from '@/components/AuthDialog';
+import AIChatSupport from '@/components/AIChatSupport';
+import AISiteManager from '@/components/AISiteManager';
 
 type Product = {
   id: number;
@@ -51,6 +54,10 @@ const Index = () => {
   const [showPaymentAnimation, setShowPaymentAnimation] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showAdminKeyDialog, setShowAdminKeyDialog] = useState(false);
+  const [showAuthDialog, setShowAuthDialog] = useState(false);
+  const [showAISupport, setShowAISupport] = useState(false);
+  const [showAISiteManager, setShowAISiteManager] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('card');
   const [searchQuery, setSearchQuery] = useState('');
   const [primaryColor, setPrimaryColor] = useState('#9b87f5');
@@ -208,6 +215,26 @@ const Index = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
+  useEffect(() => {
+    const token = localStorage.getItem('user_token');
+    const email = localStorage.getItem('user_email');
+    const name = localStorage.getItem('user_name');
+    
+    if (token && email && name) {
+      setIsAuthenticated(true);
+      setUserName(name);
+      setUser({ email, displayName: name } as User);
+    } else {
+      setShowAuthDialog(true);
+    }
+  }, []);
+
+  const handleAuthSuccess = (email: string, name: string) => {
+    setIsAuthenticated(true);
+    setUserName(name);
+    setUser({ email, displayName: name } as User);
+  };
+
   const handleGoogleLogin = async () => {
     if (!isFirebaseEnabled || !auth || !googleProvider) {
       const demoUser = { uid: 'demo', displayName: 'Демо Пользователь', email: 'demo@example.com', photoURL: '' } as User;
@@ -261,32 +288,21 @@ const Index = () => {
   };
 
   const handleLogout = async () => {
-    if (!isFirebaseEnabled || !auth) {
-      setUser(null);
-      setUserName('');
-      setUserAvatar('');
-      setUserRole('user');
-      toast({
-        title: 'Выход выполнен',
-        description: 'До встречи!'
-      });
-      return;
-    }
-
-    try {
-      await signOut(auth);
-      setUserRole('user');
-      toast({
-        title: 'Выход выполнен',
-        description: 'До встречи!'
-      });
-    } catch (error) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось выйти',
-        variant: 'destructive'
-      });
-    }
+    localStorage.removeItem('user_token');
+    localStorage.removeItem('user_email');
+    localStorage.removeItem('user_name');
+    
+    setUser(null);
+    setUserName('');
+    setUserAvatar('');
+    setUserRole('user');
+    setIsAuthenticated(false);
+    setShowAuthDialog(true);
+    
+    toast({
+      title: 'Выход выполнен',
+      description: 'До встречи!'
+    });
   };
 
   const handleAdminKeySuccess = () => {
@@ -512,6 +528,28 @@ const Index = () => {
             <Button
               variant="ghost"
               size="icon"
+              onClick={() => setShowAISupport(true)}
+              className="hover-scale"
+              title="AI Поддержка"
+            >
+              <Icon name="Bot" size={20} />
+            </Button>
+
+            {isSuperAdmin && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowAISiteManager(true)}
+                className="hover-scale"
+                title="AI Управление"
+              >
+                <Icon name="Sparkles" size={20} />
+              </Button>
+            )}
+
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={toggleTheme}
               className="hover-scale"
             >
@@ -519,7 +557,7 @@ const Index = () => {
             </Button>
 
             {!user ? (
-              <Button onClick={handleGoogleLogin} variant="outline" className="gap-2">
+              <Button onClick={() => setShowAuthDialog(true)} variant="outline" className="gap-2">
                 <Icon name="LogIn" size={18} />
                 <span className="hidden sm:inline">Войти</span>
               </Button>
@@ -826,6 +864,29 @@ const Index = () => {
         open={showAdminKeyDialog}
         onOpenChange={setShowAdminKeyDialog}
         onSuccess={handleAdminKeySuccess}
+      />
+
+      <AuthDialog
+        open={showAuthDialog}
+        onOpenChange={setShowAuthDialog}
+        onAuthSuccess={handleAuthSuccess}
+      />
+
+      <AIChatSupport
+        open={showAISupport}
+        onOpenChange={setShowAISupport}
+        userName={userName}
+      />
+
+      <AISiteManager
+        open={showAISiteManager}
+        onOpenChange={setShowAISiteManager}
+        onSiteUpdate={(updates) => {
+          if (updates.colors) {
+            setPrimaryColor(updates.colors.primary);
+            setSecondaryColor(updates.colors.secondary);
+          }
+        }}
       />
     </div>
   );

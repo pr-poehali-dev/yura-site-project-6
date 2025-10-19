@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "Get AI support response",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "userMessage": "Как оформить заказ?",
+        "userName": "Test User",
+        "messages": []
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "response": "string"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "Process site management request",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "userRequest": "Измени цвета сайта на синие",
+        "messages": []
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "response": "string",
+        "actions": ["string"]
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

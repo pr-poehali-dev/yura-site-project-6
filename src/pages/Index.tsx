@@ -29,7 +29,14 @@ type Product = {
 
 type CartItem = Product & { quantity: number };
 
-type UserRole = 'super_admin' | 'admin' | 'user';
+type UserRole = 'super_admin' | 'junior_admin' | 'user';
+
+type UserData = {
+  name: string;
+  email: string;
+  role: UserRole;
+  banned: boolean;
+};
 
 const Index = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -77,8 +84,10 @@ const Index = () => {
     }
   ]);
 
-  const [users] = useState([
-    { name: 'Демо пользователь', email: 'demo@example.com', role: 'user' }
+  const [users, setUsers] = useState<UserData[]>([
+    { name: 'Демо пользователь', email: 'demo@example.com', role: 'user', banned: false },
+    { name: 'Тестовый админ', email: 'admin@test.com', role: 'junior_admin', banned: false },
+    { name: 'Забаненный пользователь', email: 'banned@test.com', role: 'user', banned: true }
   ]);
 
   const [newProduct, setNewProduct] = useState({
@@ -89,7 +98,14 @@ const Index = () => {
   });
 
   const isSuperAdmin = userRole === 'super_admin';
-  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
+  const isJuniorAdmin = userRole === 'junior_admin';
+  const isAdmin = isSuperAdmin || isJuniorAdmin;
+
+  const currentUserData = useMemo(() => {
+    return users.find(u => u.name === userName);
+  }, [users, userName]);
+
+  const isBanned = currentUserData?.banned || false;
 
   const filteredProducts = useMemo(() => {
     if (!searchQuery.trim()) return products;
@@ -97,6 +113,14 @@ const Index = () => {
       product.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [products, searchQuery]);
+
+  useEffect(() => {
+    const savedPrimary = localStorage.getItem('site_primary_color');
+    const savedSecondary = localStorage.getItem('site_secondary_color');
+    
+    if (savedPrimary) setPrimaryColor(savedPrimary);
+    if (savedSecondary) setSecondaryColor(savedSecondary);
+  }, []);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -118,19 +142,33 @@ const Index = () => {
   useEffect(() => {
     if (isFirebaseEnabled && auth) {
       const unsubscribe = auth.onAuthStateChanged((user: User | null) => {
-        setUser(user);
         if (user) {
-          setUserName(user.displayName || 'Пользователь');
+          const userName = user.displayName || 'Пользователь';
+          const userBanStatus = localStorage.getItem(`banned_${userName}`);
+          
+          if (userBanStatus === 'true') {
+            signOut(auth);
+            toast({
+              title: 'Доступ запрещён',
+              description: 'Ваш аккаунт заблокирован',
+              variant: 'destructive'
+            });
+            return;
+          }
+
+          setUser(user);
+          setUserName(userName);
           setUserAvatar(user.photoURL || '');
           
           const superAdminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'admin@example.com';
           if (user.email === superAdminEmail) {
             setUserRole('super_admin');
           } else {
-            const storedRole = localStorage.getItem(`role_${user.uid}`);
+            const storedRole = localStorage.getItem(`role_${userName}`);
             setUserRole((storedRole as UserRole) || 'user');
           }
         } else {
+          setUser(null);
           setUserName('');
           setUserAvatar('');
           setUserRole('user');
@@ -139,7 +177,7 @@ const Index = () => {
 
       return () => unsubscribe();
     }
-  }, []);
+  }, [toast]);
 
   const hexToHSL = (hex: string) => {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -186,6 +224,19 @@ const Index = () => {
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
+      const userName = result.user.displayName || 'Пользователь';
+      const userBanStatus = localStorage.getItem(`banned_${userName}`);
+      
+      if (userBanStatus === 'true') {
+        await signOut(auth);
+        toast({
+          title: 'Доступ запрещён',
+          description: 'Ваш аккаунт заблокирован',
+          variant: 'destructive'
+        });
+        return;
+      }
+
       const superAdminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'admin@example.com';
       
       if (result.user.email === superAdminEmail) {
@@ -239,9 +290,9 @@ const Index = () => {
   };
 
   const handleAdminKeySuccess = () => {
-    setUserRole('admin');
-    if (user) {
-      localStorage.setItem(`role_${user.uid}`, 'admin');
+    setUserRole('junior_admin');
+    if (userName) {
+      localStorage.setItem(`role_${userName}`, 'junior_admin');
     }
   };
 
@@ -255,7 +306,40 @@ const Index = () => {
     setSecondaryColor(secondary);
   };
 
+  const handleUserRoleChange = (targetUserName: string, newRole: 'junior_admin' | 'user') => {
+    setUsers(prev => prev.map(u => 
+      u.name === targetUserName ? { ...u, role: newRole } : u
+    ));
+    
+    localStorage.setItem(`role_${targetUserName}`, newRole);
+  };
+
+  const handleUserBan = (targetUserName: string) => {
+    setUsers(prev => prev.map(u => 
+      u.name === targetUserName ? { ...u, banned: true } : u
+    ));
+    
+    localStorage.setItem(`banned_${targetUserName}`, 'true');
+  };
+
+  const handleUserUnban = (targetUserName: string) => {
+    setUsers(prev => prev.map(u => 
+      u.name === targetUserName ? { ...u, banned: false } : u
+    ));
+    
+    localStorage.removeItem(`banned_${targetUserName}`);
+  };
+
   const addToCart = (product: Product) => {
+    if (isBanned) {
+      toast({
+        title: 'Доступ запрещён',
+        description: 'Ваш аккаунт заблокирован',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
@@ -285,6 +369,15 @@ const Index = () => {
       return;
     }
 
+    if (isJuniorAdmin) {
+      toast({
+        title: 'Недостаточно прав',
+        description: 'Младшие админы не могут удалять товары (только 30% прав)',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     const product = products.find(p => p.id === productId);
     setProducts(prev => prev.filter(item => item.id !== productId));
     toast({
@@ -306,6 +399,16 @@ const Index = () => {
       });
       return;
     }
+
+    if (isBanned) {
+      toast({
+        title: 'Доступ запрещён',
+        description: 'Ваш аккаунт заблокирован',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setShowCheckout(true);
   };
 
@@ -320,6 +423,15 @@ const Index = () => {
   };
 
   const handleAddProduct = () => {
+    if (!isAdmin) {
+      toast({
+        title: 'Доступ запрещён',
+        description: 'Только администраторы могут добавлять товары',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     if (!newProduct.name || !newProduct.price || !newProduct.category) {
       toast({
         title: 'Ошибка',
@@ -346,6 +458,34 @@ const Index = () => {
       description: product.name
     });
   };
+
+  if (isBanned) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <Icon name="Ban" size={24} />
+              Доступ запрещён
+            </CardTitle>
+            <CardDescription>
+              Ваш аккаунт был заблокирован администратором
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground">
+              Обратитесь к администратору для разблокировки
+            </p>
+          </CardContent>
+          <CardFooter>
+            <Button onClick={handleLogout} variant="outline" className="w-full">
+              Выйти
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background transition-colors duration-300">
@@ -397,8 +537,11 @@ const Index = () => {
                     {isSuperAdmin && (
                       <Icon name="Crown" size={16} className="text-yellow-500" />
                     )}
-                    {isAdmin && !isSuperAdmin && (
-                      <Badge variant="secondary" className="ml-1">Admin</Badge>
+                    {isJuniorAdmin && (
+                      <Badge variant="secondary" className="ml-1">
+                        <Icon name="Shield" size={12} className="mr-1" />
+                        30%
+                      </Badge>
                     )}
                   </Button>
                 </DropdownMenuTrigger>
@@ -410,7 +553,7 @@ const Index = () => {
                   {isSuperAdmin && (
                     <DropdownMenuItem onClick={() => setShowAdminPanel(true)}>
                       <Icon name="Settings" size={16} className="mr-2" />
-                      Панель администратора
+                      Панель суперадмина
                     </DropdownMenuItem>
                   )}
                   {!isAdmin && (
@@ -510,7 +653,7 @@ const Index = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredProducts.map(product => (
               <Card key={product.id} className="hover-scale overflow-hidden relative group">
-                {isAdmin && (
+                {isSuperAdmin && (
                   <Button
                     variant="destructive"
                     size="icon"
@@ -613,7 +756,7 @@ const Index = () => {
           <DialogHeader>
             <DialogTitle>Добавить товар</DialogTitle>
             <DialogDescription>
-              Только администраторы могут добавлять товары
+              {isJuniorAdmin ? 'Младший админ (30% прав)' : 'Только администраторы могут добавлять товары'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -673,6 +816,10 @@ const Index = () => {
         onOpenChange={setShowAdminPanel}
         onColorChange={handleColorChange}
         users={users}
+        onUserRoleChange={handleUserRoleChange}
+        onUserBan={handleUserBan}
+        onUserUnban={handleUserUnban}
+        currentColors={{ primary: primaryColor, secondary: secondaryColor }}
       />
 
       <AdminKeyDialog

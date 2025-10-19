@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { signInWithPopup, signOut, User } from 'firebase/auth';
 import { auth, googleProvider, isFirebaseEnabled } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,8 @@ import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
 import ProfileDialog from '@/components/ProfileDialog';
 import PaymentAnimation from '@/components/PaymentAnimation';
+import AdminPanel from '@/components/AdminPanel';
+import AdminKeyDialog from '@/components/AdminKeyDialog';
 
 type Product = {
   id: number;
@@ -27,10 +29,12 @@ type Product = {
 
 type CartItem = Product & { quantity: number };
 
+type UserRole = 'super_admin' | 'admin' | 'user';
+
 const Index = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [userRole, setUserRole] = useState<UserRole>('user');
   const [user, setUser] = useState<User | null>(null);
   const [userName, setUserName] = useState('');
   const [userAvatar, setUserAvatar] = useState('');
@@ -38,7 +42,12 @@ const Index = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPaymentAnimation, setShowPaymentAnimation] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showAdminKeyDialog, setShowAdminKeyDialog] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('card');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [primaryColor, setPrimaryColor] = useState('#9b87f5');
+  const [secondaryColor, setSecondaryColor] = useState('#7E69AB');
   const { toast } = useToast();
 
   const [products, setProducts] = useState<Product[]>([
@@ -68,12 +77,26 @@ const Index = () => {
     }
   ]);
 
+  const [users] = useState([
+    { name: 'Демо пользователь', email: 'demo@example.com', role: 'user' }
+  ]);
+
   const [newProduct, setNewProduct] = useState({
     name: '',
     price: 0,
     category: '',
     image: '/placeholder.svg'
   });
+
+  const isSuperAdmin = userRole === 'super_admin';
+  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
+
+  const filteredProducts = useMemo(() => {
+    if (!searchQuery.trim()) return products;
+    return products.filter(product =>
+      product.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [products, searchQuery]);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -84,17 +107,33 @@ const Index = () => {
   }, [theme]);
 
   useEffect(() => {
+    const root = document.documentElement;
+    const hslPrimary = hexToHSL(primaryColor);
+    const hslSecondary = hexToHSL(secondaryColor);
+    
+    root.style.setProperty('--primary', hslPrimary);
+    root.style.setProperty('--secondary', hslSecondary);
+  }, [primaryColor, secondaryColor]);
+
+  useEffect(() => {
     if (isFirebaseEnabled && auth) {
       const unsubscribe = auth.onAuthStateChanged((user: User | null) => {
         setUser(user);
         if (user) {
           setUserName(user.displayName || 'Пользователь');
           setUserAvatar(user.photoURL || '');
-          setIsAdmin(true);
+          
+          const superAdminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'admin@example.com';
+          if (user.email === superAdminEmail) {
+            setUserRole('super_admin');
+          } else {
+            const storedRole = localStorage.getItem(`role_${user.uid}`);
+            setUserRole((storedRole as UserRole) || 'user');
+          }
         } else {
           setUserName('');
           setUserAvatar('');
-          setIsAdmin(false);
+          setUserRole('user');
         }
       });
 
@@ -102,29 +141,65 @@ const Index = () => {
     }
   }, []);
 
+  const hexToHSL = (hex: string) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (!result) return '262 83% 58%';
+
+    const r = parseInt(result[1], 16) / 255;
+    const g = parseInt(result[2], 16) / 255;
+    const b = parseInt(result[3], 16) / 255;
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h = 0, s = 0, l = (max + min) / 2;
+
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+        case g: h = ((b - r) / d + 2) / 6; break;
+        case b: h = ((r - g) / d + 4) / 6; break;
+      }
+    }
+
+    return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
+  };
+
   const toggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
   const handleGoogleLogin = async () => {
     if (!isFirebaseEnabled || !auth || !googleProvider) {
-      setUser({ uid: 'demo', displayName: 'Демо Пользователь', photoURL: '' } as User);
+      const demoUser = { uid: 'demo', displayName: 'Демо Пользователь', email: 'demo@example.com', photoURL: '' } as User;
+      setUser(demoUser);
       setUserName('Демо Пользователь');
       setUserAvatar('');
-      setIsAdmin(true);
+      setUserRole('super_admin');
       toast({
         title: 'Демо режим',
-        description: 'Добавьте Firebase ключи для настоящей авторизации'
+        description: 'Вы вошли как суперадмин (демо)'
       });
       return;
     }
 
     try {
-      await signInWithPopup(auth, googleProvider);
-      toast({
-        title: 'Вход выполнен',
-        description: 'Добро пожаловать!'
-      });
+      const result = await signInWithPopup(auth, googleProvider);
+      const superAdminEmail = import.meta.env.VITE_SUPER_ADMIN_EMAIL || 'admin@example.com';
+      
+      if (result.user.email === superAdminEmail) {
+        setUserRole('super_admin');
+        toast({
+          title: 'Добро пожаловать, суперадмин!',
+          description: 'У вас полный доступ к панели управления'
+        });
+      } else {
+        toast({
+          title: 'Вход выполнен',
+          description: 'Добро пожаловать!'
+        });
+      }
     } catch (error) {
       toast({
         title: 'Ошибка входа',
@@ -139,7 +214,7 @@ const Index = () => {
       setUser(null);
       setUserName('');
       setUserAvatar('');
-      setIsAdmin(false);
+      setUserRole('user');
       toast({
         title: 'Выход выполнен',
         description: 'До встречи!'
@@ -149,6 +224,7 @@ const Index = () => {
 
     try {
       await signOut(auth);
+      setUserRole('user');
       toast({
         title: 'Выход выполнен',
         description: 'До встречи!'
@@ -162,9 +238,21 @@ const Index = () => {
     }
   };
 
+  const handleAdminKeySuccess = () => {
+    setUserRole('admin');
+    if (user) {
+      localStorage.setItem(`role_${user.uid}`, 'admin');
+    }
+  };
+
   const handleProfileSave = (name: string, avatar: string) => {
     setUserName(name);
     setUserAvatar(avatar);
+  };
+
+  const handleColorChange = (primary: string, secondary: string) => {
+    setPrimaryColor(primary);
+    setSecondaryColor(secondary);
   };
 
   const addToCart = (product: Product) => {
@@ -185,6 +273,24 @@ const Index = () => {
 
   const removeFromCart = (productId: number) => {
     setCart(prev => prev.filter(item => item.id !== productId));
+  };
+
+  const deleteProduct = (productId: number) => {
+    if (!isAdmin) {
+      toast({
+        title: 'Доступ запрещён',
+        description: 'Только администраторы могут удалять товары',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const product = products.find(p => p.id === productId);
+    setProducts(prev => prev.filter(item => item.id !== productId));
+    toast({
+      title: 'Товар удалён',
+      description: product?.name
+    });
   };
 
   const getTotalPrice = () => {
@@ -244,13 +350,25 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background transition-colors duration-300">
       <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container flex h-16 items-center justify-between px-4">
+        <div className="container flex h-16 items-center justify-between px-4 gap-4">
           <div className="flex items-center gap-2">
             <Icon name="Zap" size={28} className="text-primary" />
-            <span className="text-xl font-bold">RillShop</span>
+            <span className="text-xl font-bold hidden sm:inline">RillShop</span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex-1 max-w-md">
+            <div className="relative">
+              <Icon name="Search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Поиск товаров..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
@@ -263,7 +381,7 @@ const Index = () => {
             {!user ? (
               <Button onClick={handleGoogleLogin} variant="outline" className="gap-2">
                 <Icon name="LogIn" size={18} />
-                Войти
+                <span className="hidden sm:inline">Войти</span>
               </Button>
             ) : (
               <DropdownMenu>
@@ -275,8 +393,11 @@ const Index = () => {
                         {userName.slice(0, 2).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <span className="hidden sm:inline">{userName}</span>
-                    {isAdmin && (
+                    <span className="hidden md:inline">{userName}</span>
+                    {isSuperAdmin && (
+                      <Icon name="Crown" size={16} className="text-yellow-500" />
+                    )}
+                    {isAdmin && !isSuperAdmin && (
                       <Badge variant="secondary" className="ml-1">Admin</Badge>
                     )}
                   </Button>
@@ -286,6 +407,18 @@ const Index = () => {
                     <Icon name="User" size={16} className="mr-2" />
                     Настройки профиля
                   </DropdownMenuItem>
+                  {isSuperAdmin && (
+                    <DropdownMenuItem onClick={() => setShowAdminPanel(true)}>
+                      <Icon name="Settings" size={16} className="mr-2" />
+                      Панель администратора
+                    </DropdownMenuItem>
+                  )}
+                  {!isAdmin && (
+                    <DropdownMenuItem onClick={() => setShowAdminKeyDialog(true)}>
+                      <Icon name="Key" size={16} className="mr-2" />
+                      Стать администратором
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout}>
                     <Icon name="LogOut" size={16} className="mr-2" />
@@ -353,49 +486,71 @@ const Index = () => {
         <div className="mb-8 flex justify-between items-center">
           <div>
             <h1 className="text-4xl font-bold mb-2">Магазин игровой энергии</h1>
-            <p className="text-muted-foreground">Пополните энергию для игр</p>
+            <p className="text-muted-foreground">
+              {searchQuery ? `Результаты поиска: "${searchQuery}"` : 'Пополните энергию для игр'}
+            </p>
           </div>
           {isAdmin && (
             <Button onClick={() => setShowAddProduct(true)} className="gap-2">
               <Icon name="Plus" size={18} />
-              Добавить товар
+              <span className="hidden sm:inline">Добавить товар</span>
             </Button>
           )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {products.map(product => (
-            <Card key={product.id} className="hover-scale overflow-hidden">
-              <img
-                src={product.image}
-                alt={product.name}
-                className="w-full h-48 object-cover"
-              />
-              <CardHeader>
-                <div className="flex justify-between items-start">
-                  <CardTitle>{product.name}</CardTitle>
-                  <Badge>{product.category}</Badge>
-                </div>
-                <CardDescription>
-                  {product.inStock ? 'В наличии' : 'Нет в наличии'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold text-primary">{product.price} ₽</p>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  className="w-full"
-                  disabled={!product.inStock}
-                  onClick={() => addToCart(product)}
-                >
-                  <Icon name="ShoppingBag" size={18} className="mr-2" />
-                  В корзину
-                </Button>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
+        {filteredProducts.length === 0 ? (
+          <Card className="py-12">
+            <CardContent className="text-center text-muted-foreground">
+              <Icon name="Search" size={48} className="mx-auto mb-4 opacity-50" />
+              <p className="text-lg">Товары не найдены</p>
+              <p className="text-sm">Попробуйте изменить поисковый запрос</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredProducts.map(product => (
+              <Card key={product.id} className="hover-scale overflow-hidden relative group">
+                {isAdmin && (
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => deleteProduct(product.id)}
+                  >
+                    <Icon name="Trash2" size={16} />
+                  </Button>
+                )}
+                <img
+                  src={product.image}
+                  alt={product.name}
+                  className="w-full h-48 object-cover"
+                />
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <CardTitle>{product.name}</CardTitle>
+                    <Badge>{product.category}</Badge>
+                  </div>
+                  <CardDescription>
+                    {product.inStock ? 'В наличии' : 'Нет в наличии'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-primary">{product.price} ₽</p>
+                </CardContent>
+                <CardFooter>
+                  <Button
+                    className="w-full"
+                    disabled={!product.inStock}
+                    onClick={() => addToCart(product)}
+                  >
+                    <Icon name="ShoppingBag" size={18} className="mr-2" />
+                    В корзину
+                  </Button>
+                </CardFooter>
+              </Card>
+            ))}
+          </div>
+        )}
       </main>
 
       <Dialog open={showCheckout} onOpenChange={setShowCheckout}>
@@ -511,6 +666,19 @@ const Index = () => {
         open={showPaymentAnimation}
         amount={getTotalPrice()}
         onComplete={handlePaymentComplete}
+      />
+
+      <AdminPanel
+        open={showAdminPanel}
+        onOpenChange={setShowAdminPanel}
+        onColorChange={handleColorChange}
+        users={users}
+      />
+
+      <AdminKeyDialog
+        open={showAdminKeyDialog}
+        onOpenChange={setShowAdminKeyDialog}
+        onSuccess={handleAdminKeySuccess}
       />
     </div>
   );

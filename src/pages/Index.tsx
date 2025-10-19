@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { signInWithPopup, signOut, User } from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase';
+import { auth, googleProvider, isFirebaseEnabled } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -84,20 +84,22 @@ const Index = () => {
   }, [theme]);
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      setUser(user);
-      if (user) {
-        setUserName(user.displayName || 'Пользователь');
-        setUserAvatar(user.photoURL || '');
-        setIsAdmin(true);
-      } else {
-        setUserName('');
-        setUserAvatar('');
-        setIsAdmin(false);
-      }
-    });
+    if (isFirebaseEnabled && auth) {
+      const unsubscribe = auth.onAuthStateChanged((user: User | null) => {
+        setUser(user);
+        if (user) {
+          setUserName(user.displayName || 'Пользователь');
+          setUserAvatar(user.photoURL || '');
+          setIsAdmin(true);
+        } else {
+          setUserName('');
+          setUserAvatar('');
+          setIsAdmin(false);
+        }
+      });
 
-    return () => unsubscribe();
+      return () => unsubscribe();
+    }
   }, []);
 
   const toggleTheme = () => {
@@ -105,6 +107,18 @@ const Index = () => {
   };
 
   const handleGoogleLogin = async () => {
+    if (!isFirebaseEnabled || !auth || !googleProvider) {
+      setUser({ uid: 'demo', displayName: 'Демо Пользователь', photoURL: '' } as User);
+      setUserName('Демо Пользователь');
+      setUserAvatar('');
+      setIsAdmin(true);
+      toast({
+        title: 'Демо режим',
+        description: 'Добавьте Firebase ключи для настоящей авторизации'
+      });
+      return;
+    }
+
     try {
       await signInWithPopup(auth, googleProvider);
       toast({
@@ -121,6 +135,18 @@ const Index = () => {
   };
 
   const handleLogout = async () => {
+    if (!isFirebaseEnabled || !auth) {
+      setUser(null);
+      setUserName('');
+      setUserAvatar('');
+      setIsAdmin(false);
+      toast({
+        title: 'Выход выполнен',
+        description: 'До встречи!'
+      });
+      return;
+    }
+
     try {
       await signOut(auth);
       toast({
@@ -169,7 +195,7 @@ const Index = () => {
     if (!user) {
       toast({
         title: 'Требуется авторизация',
-        description: 'Войдите через Google для оформления заказа',
+        description: 'Войдите для оформления заказа',
         variant: 'destructive'
       });
       return;
@@ -237,7 +263,7 @@ const Index = () => {
             {!user ? (
               <Button onClick={handleGoogleLogin} variant="outline" className="gap-2">
                 <Icon name="LogIn" size={18} />
-                Войти через Google
+                Войти
               </Button>
             ) : (
               <DropdownMenu>

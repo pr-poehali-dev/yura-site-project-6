@@ -1,14 +1,20 @@
 import { useState, useEffect } from 'react';
+import { signInWithPopup, signOut, User } from 'firebase/auth';
+import { auth, googleProvider } from '@/lib/firebase';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
+import ProfileDialog from '@/components/ProfileDialog';
+import PaymentAnimation from '@/components/PaymentAnimation';
 
 type Product = {
   id: number;
@@ -25,9 +31,13 @@ const Index = () => {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [userName, setUserName] = useState('');
+  const [userAvatar, setUserAvatar] = useState('');
   const [showCheckout, setShowCheckout] = useState(false);
   const [showAddProduct, setShowAddProduct] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showPaymentAnimation, setShowPaymentAnimation] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('card');
   const { toast } = useToast();
 
@@ -73,17 +83,62 @@ const Index = () => {
     }
   }, [theme]);
 
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setUser(user);
+      if (user) {
+        setUserName(user.displayName || 'Пользователь');
+        setUserAvatar(user.photoURL || '');
+        setIsAdmin(true);
+      } else {
+        setUserName('');
+        setUserAvatar('');
+        setIsAdmin(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const toggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  const handleGoogleLogin = () => {
-    setIsLoggedIn(true);
-    setIsAdmin(true);
-    toast({
-      title: 'Вход выполнен',
-      description: 'Добро пожаловать!'
-    });
+  const handleGoogleLogin = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider);
+      toast({
+        title: 'Вход выполнен',
+        description: 'Добро пожаловать!'
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка входа',
+        description: 'Не удалось войти через Google',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      toast({
+        title: 'Выход выполнен',
+        description: 'До встречи!'
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось выйти',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleProfileSave = (name: string, avatar: string) => {
+    setUserName(name);
+    setUserAvatar(avatar);
   };
 
   const addToCart = (product: Product) => {
@@ -111,7 +166,7 @@ const Index = () => {
   };
 
   const handleCheckout = () => {
-    if (!isLoggedIn) {
+    if (!user) {
       toast({
         title: 'Требуется авторизация',
         description: 'Войдите через Google для оформления заказа',
@@ -123,12 +178,13 @@ const Index = () => {
   };
 
   const completeCheckout = () => {
-    toast({
-      title: 'Заказ оформлен!',
-      description: `Оплата через ${paymentMethod === 'card' ? 'карту' : paymentMethod === 'sbp' ? 'СБП' : 'PayPal'}. Спасибо за покупку!`
-    });
-    setCart([]);
     setShowCheckout(false);
+    setShowPaymentAnimation(true);
+  };
+
+  const handlePaymentComplete = () => {
+    setCart([]);
+    setShowPaymentAnimation(false);
   };
 
   const handleAddProduct = () => {
@@ -178,19 +234,39 @@ const Index = () => {
               <Icon name={theme === 'light' ? 'Moon' : 'Sun'} size={20} />
             </Button>
 
-            {!isLoggedIn ? (
+            {!user ? (
               <Button onClick={handleGoogleLogin} variant="outline" className="gap-2">
                 <Icon name="LogIn" size={18} />
                 Войти через Google
               </Button>
             ) : (
-              <div className="flex items-center gap-2">
-                <Icon name="User" size={20} className="text-muted-foreground" />
-                <span className="text-sm">Профиль</span>
-                {isAdmin && (
-                  <Badge variant="secondary" className="ml-2">Admin</Badge>
-                )}
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="gap-2 hover-scale">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={userAvatar} alt={userName} />
+                      <AvatarFallback>
+                        {userName.slice(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="hidden sm:inline">{userName}</span>
+                    {isAdmin && (
+                      <Badge variant="secondary" className="ml-1">Admin</Badge>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setShowProfile(true)}>
+                    <Icon name="User" size={16} className="mr-2" />
+                    Настройки профиля
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout}>
+                    <Icon name="LogOut" size={16} className="mr-2" />
+                    Выйти
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
 
             <Sheet>
@@ -396,6 +472,20 @@ const Index = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ProfileDialog
+        open={showProfile}
+        onOpenChange={setShowProfile}
+        currentName={userName}
+        currentAvatar={userAvatar}
+        onSave={handleProfileSave}
+      />
+
+      <PaymentAnimation
+        open={showPaymentAnimation}
+        amount={getTotalPrice()}
+        onComplete={handlePaymentComplete}
+      />
     </div>
   );
 };

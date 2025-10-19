@@ -10,5 +10,13 @@ Allow: /
 User-agent: facebookexternalhit
 Allow: /
 
+User-agent: Yandex
+Allow: /
+
+User-agent: YandexBot
+Allow: /
+
 User-agent: *
 Allow: /
+
+Sitemap: https://rillshop-skin-market--preview.poehali.dev/sitemap.xml
